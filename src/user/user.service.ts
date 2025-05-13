@@ -1,25 +1,31 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
-import { LoginUserDto } from './dto/login-user'; 
+import { LoginUserDto } from './dto/login-user';
 import { JwtService } from '@nestjs/jwt';
 import { UpdateUserDto } from './dto/update-user.dto';
 @Injectable()
 export class UserService {
   constructor(
     private prisma: PrismaService,
-    private jwtService: JwtService, 
+    private jwtService: JwtService,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
     const { password, ...rest } = createUserDto;
-    const hashedPassword = await bcrypt.hash(password, 10); 
+    const isUserExist = await this.prisma.user.findUnique({
+      where: { email: createUserDto.email },
+    });
+    if (isUserExist) {
+      throw new BadRequestException('email alrady exist');
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await this.prisma.user.create({
       data: {
         ...rest,
-        password: hashedPassword, 
+        password: hashedPassword,
       },
     });
 
@@ -27,28 +33,34 @@ export class UserService {
   }
 
   async login(loginUserDto: LoginUserDto) {
-    const { email, password } = loginUserDto;
-
     const user = await this.prisma.user.findUnique({
-      where: { email },
+      where: { email: loginUserDto.email },
     });
 
     if (!user) {
       throw new Error('User not found');
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = await bcrypt.compare(loginUserDto.password, user.password);
     if (!isMatch) {
       throw new Error('Invalid credentials');
     }
 
-    const payload = { email: user.email, sub: user.id };
+    const payload = { email: user.email, userID: user.id };
     const token = this.jwtService.sign(payload);
 
-    return { token };
+    return {
+      message: 'login  successful',
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      },
+      token,
+    };
   }
 
-  // CRUD operations 
+  // CRUD operations
   async findAll() {
     return this.prisma.user.findMany();
   }
@@ -69,7 +81,6 @@ export class UserService {
 
     return updatedUser;
   }
-
 
   async remove(id: number) {
     return this.prisma.user.delete({
